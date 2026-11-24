@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OCR de Pastas</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #fff; --soft: #f8f9fb; --text: #1d232b; --muted: #687280;
+    --border: #e1e4e9; --accent: #2f6fdf; --accent-soft: #e8f0fd;
+    --ok: #1f8a4c; --ok-soft: #e6f4ec; --err: #c8372d; --err-soft: #fbeae8;
+    --warn: #a86a00; --warn-soft: #fdf3e1;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121519; --card: #1b1f25; --soft: #161a1f; --text: #e6e9ee; --muted: #9aa3ae;
+      --border: #2c323a; --accent: #5b93f5; --accent-soft: #1f2a3d;
+      --ok: #4cc47f; --ok-soft: #17291f; --err: #f0675c; --err-soft: #321b19;
+      --warn: #e0a640; --warn-soft: #2e2615;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1280px; margin: 0 auto; padding: 28px 16px 40px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+
+  /* Formulário */
+  form.card { padding: 18px 20px; display: grid; gap: 14px;
+    grid-template-columns: 1fr 160px auto; align-items: end; }
+  .drop { grid-column: 1 / -1; border: 2px dashed var(--border); border-radius: 10px; padding: 28px 16px;
+    text-align: center; cursor: pointer; background: var(--soft); transition: border-color .15s, background .15s; }
+  .drop:hover, .drop.sobre { border-color: var(--accent); background: var(--accent-soft); }
+  .drop strong { display: block; font-size: 1.05rem; margin-bottom: 4px; }
+  .drop span { color: var(--muted); font-size: .85rem; }
+  .drop input { display: none; }
+  .anexos { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+  .anexos:empty { display: none; }
+  .anexo { display: inline-flex; align-items: center; gap: 6px; background: var(--soft);
+    border: 1px solid var(--border); border-radius: 99px; padding: 3px 4px 3px 12px; font-size: .85rem; max-width: 100%; }
+  .anexo .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .anexo .t { color: var(--muted); font-size: .78rem; white-space: nowrap; }
+  .anexo button { border: 0; background: none; padding: 0 6px; color: var(--muted); font-size: 1rem; line-height: 1; }
+  .anexo button:hover { color: var(--err); }
+  .anexo.invalido { border-color: var(--err); color: var(--err); }
+  .limpar { justify-self: start; font-size: .85rem; }
+  label { display: block; font-weight: 600; font-size: .85rem; margin-bottom: 6px; color: var(--muted); }
+  input[type=text], input[type=search], select {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--border);
+    border-radius: 8px; background: var(--soft); color: var(--text); font: inherit;
+  }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .check { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 400;
+    font-size: .95rem; margin: 0; padding: 9px 0; white-space: nowrap; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--card); color: var(--text); padding: 6px 12px; white-space: nowrap;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff;
+    padding: 9px 20px; font-weight: 600; }
+  button:disabled { opacity: .6; cursor: progress; }
+
+  #status { margin: 18px 0 12px; color: var(--muted); min-height: 1.5em; display: flex; gap: 10px; align-items: center; }
+  #status.erro { color: var(--err); }
+  .spinner { width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: gira .8s linear infinite; }
+  @keyframes gira { to { transform: rotate(360deg); } }
+
+  /* Resumo */
+  .resumo { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px; }
+  .stat { padding: 14px 16px; }
+  .stat .v { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .stat .k { color: var(--muted); font-size: .82rem; }
+  .stat.ok .v { color: var(--ok); } .stat.erro .v { color: var(--err); } .stat.vazio .v { color: var(--warn); }
+  .barra { grid-column: 1 / -1; height: 8px; border-radius: 99px; overflow: hidden; display: flex; background: var(--border); }
+  .barra span { display: block; height: 100%; }
+
+  /* Painel principal */
+  .painel { display: grid; grid-template-columns: 340px 1fr; gap: 16px; align-items: start; }
+  .lista { display: flex; flex-direction: column; overflow: hidden; position: sticky; top: 16px;
+    max-height: calc(100vh - 32px); }
+  .filtros { padding: 12px; border-bottom: 1px solid var(--border); display: grid; gap: 8px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { font-size: .8rem; padding: 3px 10px; border-radius: 99px; }
+  .chip.ativo { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .itens { overflow-y: auto; flex: 1; }
+  .item { display: flex; gap: 10px; align-items: flex-start; width: 100%; text-align: left;
+    border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 10px 14px; background: none; }
+  .item:hover { background: var(--soft); }
+  .item.sel { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .item .dot { margin-top: 7px; }
+  .item .info { flex: 1; min-width: 0; }
+  .item .nome { font-weight: 500; overflow-wrap: anywhere; }
+  .item .dir { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+  .item .meta { color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; }
+  .nada { padding: 20px; color: var(--muted); text-align: center; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .dot.ok { background: var(--ok); } .dot.erro { background: var(--err); } .dot.vazio { background: var(--warn); }
+
+  /* Visualizador */
+  .visor { min-width: 0; overflow: hidden; }
+  .visor-topo { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex;
+    gap: 12px; align-items: center; flex-wrap: wrap; }
+  .visor-topo h2 { font-size: 1.05rem; margin: 0; flex: 1; min-width: 200px; overflow-wrap: anywhere; }
+  .acoes { display: flex; gap: 6px; flex-wrap: wrap; }
+  .abas { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .abas button { border: 0; border-radius: 0; }
+  .abas button.ativo { background: var(--accent); color: #fff; }
+  .metricas { display: flex; gap: 18px; flex-wrap: wrap; padding: 10px 18px; font-size: .82rem;
+    color: var(--muted); border-bottom: 1px solid var(--border); background: var(--soft); }
+  .metricas b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .conteudo { padding: 20px 24px; overflow: auto; max-height: calc(100vh - 160px); }
+  .vazio-visor { padding: 60px 20px; text-align: center; color: var(--muted); }
+
+  pre.bruto { margin: 0; white-space: pre-wrap; word-break: break-word;
+    font: 13px/1.6 var(--mono); counter-reset: linha; }
+  pre.bruto .l { display: block; padding-left: 3.8em; position: relative; }
+  pre.bruto .l::before { counter-increment: linha; content: counter(linha); position: absolute; left: 0;
+    width: 2.8em; text-align: right; color: var(--muted); opacity: .6; user-select: none; }
+  .msg-erro { background: var(--err-soft); color: var(--err); padding: 14px 16px; border-radius: 8px;
+    font: 13px/1.6 var(--mono); white-space: pre-wrap; }
+  mark { background: #ffe066; color: #000; border-radius: 2px; }
+
+  /* Markdown renderizado */
+  .md { max-width: 860px; line-height: 1.65; }
+  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { line-height: 1.3; margin: 1.2em 0 .5em; }
+  .md h1 { font-size: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+  .md h2 { font-size: 1.25rem; } .md h3 { font-size: 1.1rem; } .md h4, .md h5, .md h6 { font-size: 1rem; }
+  .md > :first-child { margin-top: 0; }
+  .md p { margin: 0 0 .9em; }
+  .md ul, .md ol { margin: 0 0 .9em; padding-left: 1.6em; }
+  .md hr { border: 0; border-top: 1px solid var(--border); margin: 1.5em 0; }
+  .md code { font: .88em var(--mono); background: var(--soft); border: 1px solid var(--border);
+    padding: .1em .35em; border-radius: 4px; }
+  .md pre { background: var(--soft); border: 1px solid var(--border); padding: 12px; border-radius: 8px;
+    overflow-x: auto; font: 13px/1.5 var(--mono); }
+  .md blockquote { margin: 0 0 .9em; padding-left: 1em; border-left: 3px solid var(--border); color: var(--muted); }
+  .tabela { overflow-x: auto; margin: 0 0 1.2em; border: 1px solid var(--border); border-radius: 8px; }
+  .md table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  .md th, .md td { padding: 7px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+  .md th { background: var(--soft); font-weight: 600; white-space: nowrap; }
+  .md tr:last-child td { border-bottom: 0; }
+  .md tbody tr:nth-child(even) td { background: var(--soft); }
+  .md .quebra-pagina { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .8rem; margin: 1.5em 0; }
+  .md .quebra-pagina::before, .md .quebra-pagina::after { content: ""; flex: 1; border-top: 1px dashed var(--border); }
+
+  /* JSON */
+  .json { font: 13px/1.6 var(--mono); white-space: pre-wrap; word-break: break-word; margin: 0; }
+  .json .k { color: var(--accent); } .json .s { color: var(--ok); }
+  .json .n { color: var(--warn); } .json .b { color: var(--err); }
+
+  @media (max-width: 900px) {
+    form.card { grid-template-columns: 1fr 1fr; }
+    form.card .limpar { grid-column: 1 / -1; }
+    .resumo { grid-template-columns: repeat(2, 1fr); }
+    .painel { grid-template-columns: 1fr; }
+    .lista { position: static; max-height: 340px; }
+    .conteudo { max-height: none; padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>OCR de Pastas</h1>
+  <p class="sub">Anexe um ou mais arquivos para extrair o texto.</p>
+
+  <form id="form" class="card">
+    <label class="drop" id="drop">
+      <input id="entrada" type="file" multiple
+        accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.odt,.odp,.ods,.rtf">
+      <strong>Arraste os arquivos aqui ou clique para escolher</strong>
+      <span>PDF, imagens (PNG, JPG, TIFF, BMP, WEBP) e documentos do Office/LibreOffice</span>
+    </label>
+    <div class="anexos" id="anexos"></div>
+    <button type="button" class="limpar" id="limpar" hidden>Remover todos</button>
+    <div>
+      <label for="formato">Formato</label>
+      <select id="formato">
+        <option value="markdown">Markdown</option>
+        <option value="text">Texto</option>
+        <option value="json">JSON</option>
+      </select>
+    </div>
+    <button class="primary" id="enviar" type="submit" disabled>Executar OCR</button>
+  </form>
+
+  <div id="status"></div>
+  <div id="resumo" class="resumo" hidden></div>
+
+  <div id="painel" class="painel" hidden>
+    <aside class="card lista">
+      <div class="filtros">
+        <input id="busca" type="search" placeholder="Buscar no nome ou no texto…">
+        <div class="chips" id="chips"></div>
+      </div>
+      <div class="itens" id="itens"></div>
+    </aside>
+    <section class="card visor" id="visor"></section>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const EXT = { markdown: "md", text: "txt", json: "json" };
+const fmtN = (n) => n.toLocaleString("pt-BR");
+
+const estado = { dados: null, formato: "markdown", filtro: "todos", busca: "", sel: -1, modo: "formatado" };
+
+/* ---------- Anexos ---------- */
+const EXT_OK = new Set($("entrada").accept.split(","));
+const anexos = [];
+const extDe = (nome) => (nome.match(/\.[^.]+$/)?.[0] || "").toLowerCase();
+const tamanho = (b) => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
+
+function adicionar(files) {
+  for (const f of files) {
+    if (!anexos.some((a) => a.name === f.name && a.size === f.size && a.lastModified === f.lastModified)) anexos.push(f);
+  }
+  desenharAnexos();
+}
+
+function desenharAnexos() {
+  const box = $("anexos");
+  box.innerHTML = "";
+  anexos.forEach((f, i) => {
+    const ok = EXT_OK.has(extDe(f.name));
+    const x = el("button", { type: "button", title: "Remover" }, "×");
+    x.onclick = () => { anexos.splice(i, 1); desenharAnexos(); };
+    box.append(el("span", { className: "anexo" + (ok ? "" : " invalido"), title: ok ? f.name : "Tipo não suportado" },
+      el("span", { className: "n" }, f.name), el("span", { className: "t" }, tamanho(f.size)), x));
+  });
+  $("limpar").hidden = anexos.length < 2;
+  $("enviar").disabled = !anexos.length;
+  $("enviar").textContent = anexos.length > 1 ? `Executar OCR (${anexos.length} arquivos)` : "Executar OCR";
+}
+
+$("entrada").addEventListener("change", (e) => { adicionar(e.target.files); e.target.value = ""; });
+$("limpar").onclick = () => { anexos.length = 0; desenharAnexos(); };
+const drop = $("drop");
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("sobre"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("sobre"); }));
+drop.addEventListener("drop", (e) => adicionar(e.dataTransfer.files));
+// Evita que soltar um arquivo fora da área abra o arquivo no navegador.
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => e.preventDefault());
+
+/* ---------- Requisição ---------- */
+$("form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  if (!anexos.length) return;
+  const formato = $("formato").value;
+  const corpo = new FormData();
+  anexos.forEach((f) => corpo.append("arquivos", f, f.name));
+  corpo.append("formato", formato);
+
+  $("enviar").disabled = true;
+  $("resumo").hidden = true;
+  $("painel").hidden = true;
+  const st = $("status");
+  st.className = "";
+  const t0 = Date.now();
+  const tick = () => {
+    st.innerHTML = `<span class="spinner"></span> Processando… ${Math.round((Date.now() - t0) / 1000)}s`;
+  };
+  tick();
+  const timer = setInterval(tick, 500);
+
+  try {
+    const r = await fetch("/ocr", { method: "POST", body: corpo });
+    const dados = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const det = Array.isArray(dados.detail) ? dados.detail.map((d) => d.msg).join("; ") : dados.detail;
+      throw new Error(det || `Erro ${r.status}`);
+    }
+    carregar(dados, formato);
+  } catch (e) {
+    st.className = "erro";
+    st.textContent = e.message;
+  } finally {
+    clearInterval(timer);
+    $("enviar").disabled = !anexos.length;
+  }
+});
+
+/* ---------- Estado e resumo ---------- */
+function situacao(r) {
+  if (r.status !== "ok") return "erro";
+  return (r.texto || "").trim() ? "ok" : "vazio";
+}
+
+function carregar(d, formato) {
+  d.resultados.forEach((r) => {
+    r.sit = situacao(r);
+    r.chars = (r.texto || "").length;
+    r.palavras = (r.texto || "").split(/\s+/).filter(Boolean).length;
+  });
+  Object.assign(estado, { dados: d, formato, filtro: "todos", busca: "", sel: d.resultados.length ? 0 : -1 });
+  $("busca").value = "";
+
+  $("status").textContent = d.total ? `Concluído: ${d.total} arquivo(s) processado(s).` : "Nenhum arquivo enviado.";
+  if (!d.total) return;
+
+  const vazios = d.resultados.filter((r) => r.sit === "vazio").length;
+  const ok = d.ok - vazios;
+  const chars = d.resultados.reduce((s, r) => s + r.chars, 0);
+  const pct = (n) => (100 * n) / d.total + "%";
+  $("resumo").innerHTML = `
+    <div class="card stat"><div class="v">${fmtN(d.total)}</div><div class="k">arquivos</div></div>
+    <div class="card stat ok"><div class="v">${fmtN(ok)}</div><div class="k">com texto</div></div>
+    <div class="card stat vazio"><div class="v">${fmtN(vazios)}</div><div class="k">sem texto</div></div>
+    <div class="card stat erro"><div class="v">${fmtN(d.erros)}</div><div class="k">com erro</div></div>
+    <div class="card stat"><div class="v">${d.segundos.toFixed(1)}s</div>
+      <div class="k">${fmtN(chars)} caracteres · ${(d.segundos / d.total).toFixed(2)}s/arquivo</div></div>
+    <div class="barra" title="com texto / sem texto / erro">
+      <span style="width:${pct(ok)};background:var(--ok)"></span>
+      <span style="width:${pct(vazios)};background:var(--warn)"></span>
+      <span style="width:${pct(d.erros)};background:var(--err)"></span>
+    </div>`;
+  $("resumo").hidden = false;
+  $("painel").hidden = false;
+  desenharChips();
+  desenharLista();
+  desenharVisor();
+}
+
+function visiveis() {
+  const q = estado.busca.toLowerCase();
+  return estado.dados.resultados
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => estado.filtro === "todos" || r.sit === estado.filtro)
+    .filter(({ r }) => !q || r.arquivo.toLowerCase().includes(q) || (r.texto || "").toLowerCase().includes(q));
+}
+
+/* ---------- Lista ---------- */
+function desenharChips() {
+  const rs = estado.dados.resultados;
+  const conta = (s) => rs.filter((r) => r.sit === s).length;
+  const opcoes = [["todos", "Todos", rs.length], ["ok", "Com texto", conta("ok")],
+                  ["vazio", "Sem texto", conta("vazio")], ["erro", "Erro", conta("erro")]];
+  $("chips").innerHTML = "";
+  for (const [v, rot, n] of opcoes) {
+    if (v !== "todos" && !n) continue;
+    const b = el("button", { className: "chip" + (estado.filtro === v ? " ativo" : ""), type: "button" },
+                 `${rot} (${n})`);
+    b.onclick = () => { estado.filtro = v; desenharChips(); desenharLista(true); };
+    $("chips").append(b);
+  }
+}
+
+function desenharLista(ajustarSel = false) {
+  const lista = visiveis();
+  if (ajustarSel && !lista.some(({ i }) => i === estado.sel)) {
+    estado.sel = lista.length ? lista[0].i : -1;
+    desenharVisor();
+  }
+  const box = $("itens");
+  box.innerHTML = "";
+  if (!lista.length) { box.append(el("div", { className: "nada" }, "Nenhum arquivo encontrado.")); return; }
+  for (const { r, i } of lista) {
+    const partes = r.arquivo.split("/");
+    const nome = partes.pop();
+    const meta = r.sit === "erro" ? `erro · ${r.segundos}s`
+      : `${fmtN(r.chars)} caracteres · ${fmtN(r.palavras)} palavras · ${r.segundos}s`;
+    const b = el("button", { className: "item" + (i === estado.sel ? " sel" : ""), type: "button" },
+      el("span", { className: "dot " + r.sit }),
+      el("span", { className: "info" },
+        el("div", { className: "nome" }, nome),
+        partes.length ? el("div", { className: "dir" }, partes.join("/") + "/") : "",
+        el("div", { className: "meta" }, meta)));
+    b.onclick = () => { estado.sel = i; desenharLista(); desenharVisor(); };
+    box.append(b);
+  }
+}
+
+$("busca").addEventListener("input", (e) => {
+  estado.busca = e.target.value.trim();
+  desenharLista(true);
+  desenharVisor();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (!estado.dados || ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  const lista = visiveis();
+  const pos = lista.findIndex(({ i }) => i === estado.sel);
+  const novo = lista[pos + (e.key === "ArrowDown" ? 1 : -1)];
+  if (!novo) return;
+  e.preventDefault();
+  estado.sel = novo.i;
+  desenharLista();
+  desenharVisor();
+  document.querySelector(".item.sel")?.scrollIntoView({ block: "nearest" });
+});
+
+/* ---------- Visualizador ---------- */
+function desenharVisor() {
+  const v = $("visor");
+  v.innerHTML = "";
+  const r = estado.dados?.resultados[estado.sel];
+  if (!r) { v.append(el("div", { className: "vazio-visor" }, "Selecione um arquivo na lista.")); return; }
+
+  const topo = el("div", { className: "visor-topo" }, el("h2", {}, r.arquivo));
+  if (r.sit !== "erro") {
+    const abas = el("div", { className: "abas" });
+    for (const [m, rot] of [["formatado", "Formatado"], ["bruto", "Texto bruto"]]) {
+      const b = el("button", { type: "button", className: estado.modo === m ? "ativo" : "" }, rot);
+      b.onclick = () => { estado.modo = m; desenharVisor(); };
+      abas.append(b);
+    }
+    const copiar = el("button", { type: "button" }, "Copiar");
+    copiar.onclick = async () => {
+      await navigator.clipboard.writeText(r.texto);
+      copiar.textContent = "Copiado!";
+      setTimeout(() => (copiar.textContent = "Copiar"), 1500);
+    };
+    const baixar = el("button", { type: "button" }, "Baixar");
+    baixar.onclick = () => salvar(r.arquivo.split("/").pop() + "." + EXT[estado.formato], r.texto);
+    topo.append(el("div", { className: "acoes" }, abas, copiar, baixar, botaoBaixarTudo()));
+  } else {
+    topo.append(el("div", { className: "acoes" }, botaoBaixarTudo()));
+  }
+  v.append(topo);
+
+  if (r.sit !== "erro") {
+    const linhas = r.texto ? r.texto.split("\n").length : 0;
+    v.append(el("div", { className: "metricas" },
+      metrica("Caracteres", fmtN(r.chars)), metrica("Palavras", fmtN(r.palavras)),
+      metrica("Linhas", fmtN(linhas)), metrica("Tempo", r.segundos + "s"),
+      metrica("Formato", estado.formato)));
+  }
+
+  const c = el("div", { className: "conteudo" });
+  if (r.sit === "erro") {
+    c.append(el("div", { className: "msg-erro" }, r.erro || "Erro desconhecido"));
+  } else if (r.sit === "vazio") {
+    c.append(el("div", { className: "vazio-visor" }, "Nenhum texto foi extraído deste arquivo."));
+  } else if (estado.modo === "bruto") {
+    const pre = el("pre", { className: "bruto" });
+    pre.innerHTML = r.texto.split("\n").map((l) => `<span class="l">${destacar(esc(l)) || " "}</span>`).join("");
+    c.append(pre);
+  } else if (estado.formato === "markdown") {
+    const div = el("div", { className: "md" });
+    div.innerHTML = destacar(markdown(r.texto));
+    c.append(div);
+  } else if (estado.formato === "json") {
+    const pre = el("pre", { className: "json" });
+    pre.innerHTML = destacar(jsonColorido(r.texto));
+    c.append(pre);
+  } else {
+    const div = el("div", { className: "md" });
+    div.innerHTML = r.texto.split(/\n{2,}/).map((p) => `<p>${destacar(esc(p)).replace(/\n/g, "<br>")}</p>`).join("");
+    c.append(div);
+  }
+  v.append(c);
+  c.querySelector("mark")?.scrollIntoView({ block: "center" });
+}
+
+function metrica(k, v) { return el("span", {}, k + ": ", el("b", {}, v)); }
+
+function botaoBaixarTudo() {
+  const b = el("button", { type: "button", title: "Todos os resultados em um arquivo" }, "Baixar tudo");
+  b.onclick = () => {
+    const d = estado.dados;
+    if (estado.formato === "json") {
+      const arr = d.resultados.map((r) => {
+        let conteudo = r.texto;
+        try { conteudo = JSON.parse(r.texto); } catch {}
+        return { arquivo: r.arquivo, status: r.status, erro: r.erro, conteudo };
+      });
+      salvar("ocr_resultados.json", JSON.stringify(arr, null, 2));
+    } else {
+      const md = estado.formato === "markdown";
+      const partes = d.resultados.map((r) =>
+        (md ? `# ${r.arquivo}\n\n` : `===== ${r.arquivo} =====\n\n`) + (r.status === "ok" ? r.texto : `[ERRO] ${r.erro}`));
+      salvar("ocr_resultados." + EXT[estado.formato], partes.join(md ? "\n\n---\n\n" : "\n\n"));
+    }
+  };
+  return b;
+}
+
+/* ---------- Utilitários ---------- */
+function el(tag, props = {}, ...filhos) {
+  const e = Object.assign(document.createElement(tag), props);
+  for (const f of filhos) if (f !== "" && f != null) e.append(f);
+  return e;
+}
+
+function esc(s) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+function salvar(nome, texto) {
+  const url = URL.createObjectURL(new Blob([texto], { type: "text/plain;charset=utf-8" }));
+  el("a", { href: url, download: nome }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Destaca o termo buscado somente fora das tags HTML.
+function destacar(html) {
+  const q = estado.busca;
+  if (!q) return html;
+  const re = new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+  return html.split(/(<[^>]+>)/).map((p) => (p.startsWith("<") ? p : p.replace(re, (m) => `<mark>${m}</mark>`))).join("");
+}
+
+function jsonColorido(texto) {
+  let fmt = texto;
+  try { fmt = JSON.stringify(JSON.parse(texto), null, 2); } catch { return esc(texto); }
+  return esc(fmt).replace(
+    /(&quot;(?:\\.|[^&\\]|&(?!quot;))*?&quot;)(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
+    (m, str, dois, lit) => {
+      if (str) return dois ? `<span class="k">${str}</span>${dois}` : `<span class="s">${str}</span>`;
+      if (lit) return `<span class="b">${m}</span>`;
+      return `<span class="n">${m}</span>`;
+    });
+}
+
+/* Renderizador simples de Markdown (sem dependências): títulos, parágrafos,
+   listas, tabelas, citações, blocos de código, linhas horizontais e ênfase. */
+function markdown(src) {
+  const linhas = src.replace(/\r\n?/g, "\n").split("\n");
+  const out = [];
+  let i = 0;
+  const inline = (t) => esc(t)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "[imagem: $1]")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (m, a, b) => `<strong>${a ?? b}</strong>`)
+    .replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, "$1<em>$2</em>")
+    .replace(/&lt;br\s*\/?&gt;/gi, "<br>");
+  const celulas = (l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+  const ehSeparador = (l) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l || "");
+
+  while (i < linhas.length) {
+    const l = linhas[i];
+    if (!l.trim()) { i++; continue; }
+
+    if (/^\s*```/.test(l)) {
+      const bloco = [];
+      i++;
+      while (i < linhas.length && !/^\s*```/.test(linhas[i])) bloco.push(linhas[i++]);
+      i++;
+      out.push(`<pre>${esc(bloco.join("\n"))}</pre>`);
+      continue;
+    }
+    const h = l.match(/^\s*(#{1,6})\s+(.*?)\s*#*\s*$/);
+    if (h) { out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); i++; continue; }
+
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(l)) { out.push("<hr>"); i++; continue; }
+
+    if (/^\s*<!--\s*page/i.test(l) || /^\s*\f/.test(l)) {
+      const n = l.match(/\d+/);
+      out.push(`<div class="quebra-pagina">${n ? "página " + n[0] : "nova página"}</div>`);
+      i++; continue;
+    }
+
+    if (l.includes("|") && ehSeparador(linhas[i + 1])) {
+      const cab = celulas(l);
+      i += 2;
+      const corpo = [];
+      while (i < linhas.length && linhas[i].includes("|") && linhas[i].trim()) corpo.push(celulas(linhas[i++]));
+      out.push(`<div class="tabela"><table><thead><tr>${cab.map((c) => `<th>${inline(c)}</th>`).join("")}</tr></thead><tbody>${
+        corpo.map((r) => `<tr>${cab.map((_, k) => `<td>${inline(r[k] ?? "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`);
+      continue;
+    }
+
+    if (/^\s*([-*+]|\d+[.)])\s+/.test(l)) {
+      const ordenada = /^\s*\d/.test(l);
+      const itens = [];
+      while (i < linhas.length && /^\s*([-*+]|\d+[.)])\s+/.test(linhas[i]))
+        itens.push(linhas[i++].replace(/^\s*([-*+]|\d+[.)])\s+/, ""));
+      const tag = ordenada ? "ol" : "ul";
+      out.push(`<${tag}>${itens.map((t) => `<li>${inline(t)}</li>`).join("")}</${tag}>`);
+      continue;
+    }
+
+    if (/^\s*>/.test(l)) {
+      const bloco = [];
+      while (i < linhas.length && /^\s*>/.test(linhas[i])) bloco.push(linhas[i++].replace(/^\s*>\s?/, ""));
+      out.push(`<blockquote>${bloco.map(inline).join("<br>")}</blockquote>`);
+      continue;
+    }
+
+    const par = [];
+    while (i < linhas.length && linhas[i].trim() &&
+           !/^\s*(#{1,6}\s|```|>|([-*+]|\d+[.)])\s+)/.test(linhas[i]) &&
+           !(linhas[i].includes("|") && ehSeparador(linhas[i + 1]))) par.push(linhas[i++]);
+    if (!par.length) par.push(linhas[i++]);
+    out.push(`<p>${par.map(inline).join("<br>")}</p>`);
+  }
+  return out.join("\n");
+}
+</script>
+</body>
+</html>
